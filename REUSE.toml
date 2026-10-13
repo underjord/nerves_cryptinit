@@ -1,0 +1,23 @@
+version = 1
+SPDX-PackageName = "nerves_cryptinit"
+SPDX-PackageSupplier = "Frank Hunleth <fhunleth@troodon-software.com>"
+SPDX-PackageDownloadLocation = "https://github.com/underjord/nerves_cryptinit"
+
+# Source files carry their own headers. This covers the rest: docs, examples,
+# build files and test data.
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "2026 Frank Hunleth"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Kernel uapi header, retyped to stdint. Its own tag spells the license the
+# deprecated way (LGPL-2.0+); corrected here rather than by editing a
+# third-party header.
+[[annotations]]
+path = "src/compat/linux/dm-ioctl.h"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2001-2003 Sistina Software (UK) Limited",
+  "2004-2009 Red Hat, Inc.",
+]
+SPDX-License-Identifier = "LGPL-2.0-or-later WITH Linux-syscall-note"

@@ -1,0 +1,68 @@
+# Encrypted + verified rootfs AND an encrypted data partition. The rootfs
+# is the full flash -> dm-crypt -> dm-verity -> squashfs stack (dm-0 crypt,
+# dm-1 verity); the data partition is set up after switch_root, so the
+# fixture's path rerouting moves to /mnt-based paths.
+
+cat > "$CMDLINE_FILE" <<'EOF'
+root=/dev/mmcblk0p2 rootfstype=squashfs ro init=/sbin/init verity_roothash=deadbeef00112233
+EOF
+
+mkdir -p "$WORK_DIR/etc"
+cat > "$CONFIG" <<'EOF'
+rootfs_key = hex:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+data_device = /dev/mmcblk0p3
+data_key = hex:ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100
+EOF
+
+# Source devices and dm-control before switch_root.
+dd if=/dev/zero of="$WORK_DIR/dev/mmcblk0p2" bs=512 count=1024 2>/dev/null
+mkdir -p "$WORK_DIR/dev/mapper"
+touch "$WORK_DIR/dev/mapper/control"
+
+# Decrypted rootfs view (dm-0) carrying the squashfs + verity superblocks.
+stage_verity_device "$WORK_DIR/dev/dm-0" 32768 8
+stage_squashfs_header "$WORK_DIR/dev/dm-0" 32768
+
+# After switch_root, paths are looked up under /mnt/.
+mkdir -p "$WORK_DIR/mnt/dev/mapper"
+touch "$WORK_DIR/mnt/dev/mapper/control"
+dd if=/dev/zero of="$WORK_DIR/mnt/dev/mmcblk0p3" bs=512 count=1024 2>/dev/null
+
+mkdir -p "$WORK_DIR/mnt/sbin"
+cat > "$WORK_DIR/mnt/sbin/init" <<'EOF'
+#!/bin/sh
+echo "Hello from /sbin/init"
+EOF
+chmod +x "$WORK_DIR/mnt/sbin/init"
+
+cat > "$EXPECTED" <<'EOF'
+nerves_cryptinit: v0.0.1 starting
+fixture: mkdir("/dev", 755)
+fixture: mkdir("/sys", 555)
+fixture: mkdir("/proc", 555)
+fixture: mkdir("/mnt", 755)
+fixture: mount("devtmpfs", "/dev", "devtmpfs", 10, data)
+fixture: mount("sysfs", "/sys", "sysfs", 14, data)
+fixture: mount("proc", "/proc", "proc", 14, data)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=0, dev=0x0, name=rootfs, uuid=CRYPT-PLAIN-rootfs)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=32768, dev=0x0, name=rootfs, uuid=, target=0,1024,crypt (aes-xts-plain64 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff 0 /dev/mmcblk0p2 0))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=32768, dev=0x0, name=rootfs, uuid=)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=VERITY-vroot)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=1, dev=0x0, name=vroot, uuid=, target=0,64,verity (1 /dev/dm-0 /dev/dm-0 4096 4096 8 9 sha256 deadbeef00112233 -))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=)
+fixture: mount("/dev/dm-1", "/mnt", "squashfs", 1, data)
+fixture: mount("/dev", "/mnt/dev", "(null)", 8192, data)
+fixture: umount("/sys")
+fixture: umount("/proc")
+fixture: unlinkat("etc", AT_REMOVEDIR)
+fixture: rmdir("/sys")
+fixture: rmdir("/proc")
+fixture: chdir("/mnt")
+fixture: mount(".", "/", "(null)", 8192, data)
+fixture: chroot(".")
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=0, dev=0x0, name=data, uuid=CRYPT-PLAIN-data)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=32768, dev=0x0, name=data, uuid=, target=0,1024,crypt (aes-xts-plain64 ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100 0 /dev/mmcblk0p3 0))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=32768, dev=0x0, name=data, uuid=)
+fixture: execv("/sbin/init")
+Hello from /sbin/init
+EOF

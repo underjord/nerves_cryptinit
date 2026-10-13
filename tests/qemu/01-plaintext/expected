@@ -1,0 +1,7 @@
+# Each non-comment, non-empty line is a substring that must appear somewhere
+# in QEMU's serial output for the test to pass.
+nerves_cryptinit: v0.0.1 starting
+==NERVES_CRYPTINIT_TEST==
+==SCENARIO=01-plaintext==
+==REACHED_ROOTFS==
+==DONE==

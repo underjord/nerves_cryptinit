@@ -1,0 +1,10 @@
+*.o
+*.a
+*.dSYM/
+src/init
+tests/unit/test_*
+!tests/unit/test_*.c
+tests/work/
+tests/fixture/init_fixture.so
+examples/pi5-otp/unlock
+.DS_Store

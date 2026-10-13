@@ -1,0 +1,63 @@
+# Encrypted AND integrity-verified rootfs — the full stack:
+# flash -> dm-crypt -> dm-verity -> squashfs. dm-crypt decrypts the flash
+# partition into /dev/dm-0; dm-verity verifies that decrypted view (so the
+# hash tree, co-located on /dev/dm-0, is encrypted on flash) into /dev/dm-1,
+# which is what we mount.
+
+cat > "$CMDLINE_FILE" <<'EOF'
+root=/dev/mmcblk0p2 rootfstype=squashfs ro init=/sbin/init verity_roothash=deadbeef00112233
+EOF
+
+mkdir -p "$WORK_DIR/etc"
+cat > "$CONFIG" <<'EOF'
+rootfs_key = hex:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+EOF
+
+# Encrypted source device (512KB → 1024 blocks of 512 bytes for dm-crypt's
+# block-count math). /dev/mapper/control just needs to be openable.
+dd if=/dev/zero of="$WORK_DIR/dev/mmcblk0p2" bs=512 count=1024 2>/dev/null
+mkdir -p "$WORK_DIR/dev/mapper"
+touch "$WORK_DIR/dev/mapper/control"
+
+# The decrypted view that dm-crypt would produce. The fixture fakes the
+# crypt ioctls, so we stage /dev/dm-0 directly with the squashfs superblock
+# (sizes the filesystem -> hash offset 32768) and the verity superblock that
+# init reads through to build the verity table.
+stage_verity_device "$WORK_DIR/dev/dm-0" 32768 8
+stage_squashfs_header "$WORK_DIR/dev/dm-0" 32768
+
+mkdir -p "$WORK_DIR/mnt/sbin"
+cat > "$WORK_DIR/mnt/sbin/init" <<'EOF'
+#!/bin/sh
+echo "Hello from /sbin/init"
+EOF
+chmod +x "$WORK_DIR/mnt/sbin/init"
+
+cat > "$EXPECTED" <<'EOF'
+nerves_cryptinit: v0.0.1 starting
+fixture: mkdir("/dev", 755)
+fixture: mkdir("/sys", 555)
+fixture: mkdir("/proc", 555)
+fixture: mkdir("/mnt", 755)
+fixture: mount("devtmpfs", "/dev", "devtmpfs", 10, data)
+fixture: mount("sysfs", "/sys", "sysfs", 14, data)
+fixture: mount("proc", "/proc", "proc", 14, data)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=0, dev=0x0, name=rootfs, uuid=CRYPT-PLAIN-rootfs)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=32768, dev=0x0, name=rootfs, uuid=, target=0,1024,crypt (aes-xts-plain64 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff 0 /dev/mmcblk0p2 0))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=32768, dev=0x0, name=rootfs, uuid=)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=VERITY-vroot)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=1, dev=0x0, name=vroot, uuid=, target=0,64,verity (1 /dev/dm-0 /dev/dm-0 4096 4096 8 9 sha256 deadbeef00112233 -))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=)
+fixture: mount("/dev/dm-1", "/mnt", "squashfs", 1, data)
+fixture: mount("/dev", "/mnt/dev", "(null)", 8192, data)
+fixture: umount("/sys")
+fixture: umount("/proc")
+fixture: unlinkat("etc", AT_REMOVEDIR)
+fixture: rmdir("/sys")
+fixture: rmdir("/proc")
+fixture: chdir("/mnt")
+fixture: mount(".", "/", "(null)", 8192, data)
+fixture: chroot(".")
+fixture: execv("/sbin/init")
+Hello from /sbin/init
+EOF

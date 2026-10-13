@@ -1,0 +1,5 @@
+nerves_cryptinit: v0.0.1 starting
+==NERVES_CRYPTINIT_TEST==
+==SCENARIO=02-dm-crypt-hex==
+==REACHED_ENCRYPTED_ROOTFS==
+==DONE==

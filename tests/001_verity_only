@@ -1,0 +1,58 @@
+# Integrity-verified rootfs, no encryption — the simplest happy path now
+# that dm-verity is mandatory. flash -> dm-verity -> squashfs. The root
+# hash rides the (signed) kernel cmdline; the algorithm, salt, block sizes,
+# and data-block count come from the verity superblock init reads off the
+# rootfs device, and the hash offset is derived from the squashfs size. No
+# /etc/initramfs.conf is needed at all for this case.
+
+cat > "$CMDLINE_FILE" <<'EOF'
+root=/dev/mmcblk0p2 rootfstype=squashfs ro init=/sbin/init verity_roothash=deadbeef00112233
+EOF
+
+mkdir -p "$WORK_DIR/etc"
+
+# The rootfs device carries the filesystem in [0, 32768) and the verity
+# hash tree (superblock first) at offset 32768. init reads the squashfs
+# superblock to size the filesystem (-> hash offset 32768), then reads the
+# verity superblock there. The fixture intercepts the dm ioctls.
+stage_verity_device "$WORK_DIR/dev/mmcblk0p2" 32768 8
+stage_squashfs_header "$WORK_DIR/dev/mmcblk0p2" 32768
+
+# /dev/mapper/control just needs to be openable; the fixture handles ioctls.
+mkdir -p "$WORK_DIR/dev/mapper"
+touch "$WORK_DIR/dev/mapper/control"
+
+mkdir -p "$WORK_DIR/mnt/sbin"
+cat > "$WORK_DIR/mnt/sbin/init" <<'EOF'
+#!/bin/sh
+echo "Hello from /sbin/init"
+EOF
+chmod +x "$WORK_DIR/mnt/sbin/init"
+
+# length = data_blocks * (data_block_size / 512) = 8 * 8 = 64 sectors.
+# hash_start_block = hash_offset / hash_block_size + 1 = 32768 / 4096 + 1 = 9.
+cat > "$EXPECTED" <<'EOF'
+nerves_cryptinit: v0.0.1 starting
+fixture: mkdir("/dev", 755)
+fixture: mkdir("/sys", 555)
+fixture: mkdir("/proc", 555)
+fixture: mkdir("/mnt", 755)
+fixture: mount("devtmpfs", "/dev", "devtmpfs", 10, data)
+fixture: mount("sysfs", "/sys", "sysfs", 14, data)
+fixture: mount("proc", "/proc", "proc", 14, data)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=VERITY-vroot)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=1, dev=0x0, name=vroot, uuid=, target=0,64,verity (1 /dev/mmcblk0p2 /dev/mmcblk0p2 4096 4096 8 9 sha256 deadbeef00112233 -))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=)
+fixture: mount("/dev/dm-0", "/mnt", "squashfs", 1, data)
+fixture: mount("/dev", "/mnt/dev", "(null)", 8192, data)
+fixture: umount("/sys")
+fixture: umount("/proc")
+fixture: unlinkat("etc", AT_REMOVEDIR)
+fixture: rmdir("/sys")
+fixture: rmdir("/proc")
+fixture: chdir("/mnt")
+fixture: mount(".", "/", "(null)", 8192, data)
+fixture: chroot(".")
+fixture: execv("/sbin/init")
+Hello from /sbin/init
+EOF

@@ -1,0 +1,33 @@
+# Kernel options that nerves_cryptinit relies on. Merged on top of
+# Buildroot's qemu_aarch64_virt defconfig kernel config.
+
+# dm-crypt with the cipher we default to (aes-xts-plain64).
+CONFIG_MD=y
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_CRYPT=y
+CONFIG_CRYPTO_AES=y
+CONFIG_CRYPTO_XTS=y
+
+# dm-verity (mandatory in nerves_cryptinit) and the default hash algorithm.
+CONFIG_DM_VERITY=y
+CONFIG_CRYPTO_SHA256=y
+
+# squashfs is what Nerves rootfs images use.
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+
+# devtmpfs gives /dev/dm-N etc. without needing udev.
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# Allow QEMU's -initrd to be loaded as an initramfs.
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+
+# pmsg (so init's logs survive across QEMU resets if anything goes wrong).
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_PMSG=y
+
+# Magic SysRq, used by /sbin/init in the test rootfs to power off cleanly.
+CONFIG_MAGIC_SYSRQ=y

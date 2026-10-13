@@ -1,0 +1,69 @@
+# Regression test for the data-partition dm-crypt IV offset.
+#
+# A verity-only rootfs (no rootfs encryption) plus an encrypted data
+# partition set up after switch_root. This isolates the data-crypt table
+# line: the dm-crypt IV offset (the field after the key) MUST be 0.
+#
+# `cryptsetup open --type=plain` uses IV offset 0 by default, so any data
+# partition provisioned that way only maps back to the same plaintext when
+# init also uses 0.
+# A non-zero offset shifts every sector's IV and silently returns garbage.
+
+cat > "$CMDLINE_FILE" <<'EOF'
+root=/dev/mmcblk0p2 rootfstype=squashfs ro init=/sbin/init verity_roothash=deadbeef00112233
+EOF
+
+mkdir -p "$WORK_DIR/etc"
+cat > "$CONFIG" <<'EOF'
+data_device = /dev/mmcblk0p3
+data_key = hex:ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100
+data_cipher = aes-cbc-plain
+EOF
+
+# Verity-only rootfs: filesystem in [0, 32768), hash tree at 32768.
+stage_verity_device "$WORK_DIR/dev/mmcblk0p2" 32768 8
+stage_squashfs_header "$WORK_DIR/dev/mmcblk0p2" 32768
+
+mkdir -p "$WORK_DIR/dev/mapper"
+touch "$WORK_DIR/dev/mapper/control"
+
+# The data device and dm-control are reached under /mnt after switch_root.
+mkdir -p "$WORK_DIR/mnt/dev/mapper"
+touch "$WORK_DIR/mnt/dev/mapper/control"
+dd if=/dev/zero of="$WORK_DIR/mnt/dev/mmcblk0p3" bs=512 count=1024 2>/dev/null
+
+mkdir -p "$WORK_DIR/mnt/sbin"
+cat > "$WORK_DIR/mnt/sbin/init" <<'EOF'
+#!/bin/sh
+echo "Hello from /sbin/init"
+EOF
+chmod +x "$WORK_DIR/mnt/sbin/init"
+
+cat > "$EXPECTED" <<'EOF'
+nerves_cryptinit: v0.0.1 starting
+fixture: mkdir("/dev", 755)
+fixture: mkdir("/sys", 555)
+fixture: mkdir("/proc", 555)
+fixture: mkdir("/mnt", 755)
+fixture: mount("devtmpfs", "/dev", "devtmpfs", 10, data)
+fixture: mount("sysfs", "/sys", "sysfs", 14, data)
+fixture: mount("proc", "/proc", "proc", 14, data)
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=VERITY-vroot)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=1, dev=0x0, name=vroot, uuid=, target=0,64,verity (1 /dev/mmcblk0p2 /dev/mmcblk0p2 4096 4096 8 9 sha256 deadbeef00112233 -))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=1, dev=0x0, name=vroot, uuid=)
+fixture: mount("/dev/dm-0", "/mnt", "squashfs", 1, data)
+fixture: mount("/dev", "/mnt/dev", "(null)", 8192, data)
+fixture: umount("/sys")
+fixture: umount("/proc")
+fixture: unlinkat("etc", AT_REMOVEDIR)
+fixture: rmdir("/sys")
+fixture: rmdir("/proc")
+fixture: chdir("/mnt")
+fixture: mount(".", "/", "(null)", 8192, data)
+fixture: chroot(".")
+fixture: ioctl(DM_DEV_CREATE, data_size=16384, data_start=312, target_count=0, flags=0, dev=0x0, name=data, uuid=CRYPT-PLAIN-data)
+fixture: ioctl(DM_TABLE_LOAD, data_size=16384, data_start=312, target_count=1, flags=32768, dev=0x0, name=data, uuid=, target=0,1024,crypt (aes-cbc-plain ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100 0 /dev/mmcblk0p3 0))
+fixture: ioctl(DM_DEV_SUSPEND, data_size=16384, data_start=312, target_count=0, flags=32768, dev=0x0, name=data, uuid=)
+fixture: execv("/sbin/init")
+Hello from /sbin/init
+EOF
